@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { Task } from './schema/task.schema';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -27,16 +27,21 @@ export class TaskService {
     return newTask.save();
   }
 
-  async getAllProjectTasks(projectId: string) {
+  async getAllProjectTasks(projectId: string, search: string, completedFilter?: boolean) {
     const projectObjectId = new Types.ObjectId(projectId);
+    const matchStep = {projectId: projectObjectId};
+    if (completedFilter !== undefined) matchStep['completed'] = completedFilter;
 
-    return this.taskModel.aggregate([
+    const pipeline: PipelineStage[] = [
       {
-        $match: {
-          projectId: projectObjectId,
+        $match: matchStep,
+      },
+      {
+        $sort: {
+          createdAt: -1,
         },
       },
-      // Group tasks into an "entities" hashmap and "hierarchy" list
+      // Group into an "entities" and a "hierarchy" list that is used in FE to display tasks.
       {
         $group: {
           _id: null,
@@ -48,16 +53,41 @@ export class TaskService {
               projectId: {$toString: '$projectId'},
               completed: '$completed',
               createdAt: '$createdAt',
-            },
+            }
           },
           hierarchy: {
             $push: {
-              parentTaskId: {$ifNull: [{$toString: '$parentTaskId'}, 'root']}, // Use parentTaskId or use root
-              taskId: {$toString: '$_id'},
-            },
-          },
-        },
+              parentTaskId: {$ifNull: [{$toString: '$parentTaskId'}, 'root']},
+              taskId: {$toString: '$_id'}
+            }
+          }
+        }
       },
+      //Check if parentTaskId is listed in entities, if not it should act as a root in hierarchy.
+      //This can happen when a subtask is returned from the fuzzy search.
+      {
+        $addFields: {
+          hierarchy: {
+            $map: {
+              input: '$hierarchy',
+              as: 'item',
+              in: {
+                parentTaskId: {
+                  $cond: {
+                    if: {
+                      $in: ['$$item.parentTaskId', {$map: {input: '$entities', as: 'entity', in: '$$entity._id'}}]
+                    },
+                    then: '$$item.parentTaskId',
+                    else: 'root'
+                  }
+                },
+                taskId: '$$item.taskId'
+              }
+            }
+          }
+        }
+      },
+      //Turn the entities and hierarchy arrays into a hashmap
       {
         $project: {
           _id: 0,
@@ -99,7 +129,7 @@ export class TaskService {
           },
         },
       },
-      // Allows us to check the result of previous steps, used to handle empty projects
+      // Allows us to check the result of previous steps -> used to handle empty projects
       {
         $facet: {
           result: [{$limit: 1}],
@@ -116,17 +146,35 @@ export class TaskService {
           },
         },
       },
-    ]);
+    ];
+
+    if (search) {
+      pipeline.unshift({
+        $search: {
+          index: 'default',
+          text: {
+            query: search ?? '',
+            path: 'title',
+            //TODO: Check if we need this
+            // fuzzy: {
+            //   maxEdits: 2, // Allows up to 2 edits (insertions, deletions, or substitutions)
+            // },
+          },
+        },
+      });
+    }
+
+    return this.taskModel.aggregate(pipeline);
   }
 
-  async getProjectInfo(projectId: string) {
+  async getProjectInfo(projectId: string, search: string, completedFilter?: boolean) {
     if (!Types.ObjectId.isValid(projectId)) {
       throw new BadRequestException('Invalid projectId');
     }
 
     return await Promise.all([
       this.projectModel.findById(projectId).exec(),
-      this.getAllProjectTasks(projectId)
+      this.getAllProjectTasks(projectId, search, completedFilter)
     ]).then(([projectData, projectTasks]) => {
       if (!projectData) {
         throw new NotFoundException('Project not found');
