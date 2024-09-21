@@ -10,6 +10,14 @@ export class CreateTaskDto {
   parentTaskId: string | null;
 
   @IsString()
+  @IsOptional()
+  previousTaskId: string | null;
+
+  @IsString()
+  @IsOptional()
+  nextTaskId: string | null;
+
+  @IsString()
   @IsNotEmpty()
   projectId: string;
 }

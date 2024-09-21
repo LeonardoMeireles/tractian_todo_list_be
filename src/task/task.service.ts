@@ -24,6 +24,11 @@ export class TaskService {
     }
 
     const newTask = new this.taskModel(createTaskDto);
+    newTask.order = 0;
+    await this.taskModel.updateMany(
+      {parentTaskId: newTask.parentTaskId},
+      {$inc: {order: 1}}
+    );
     return newTask.save();
   }
 
@@ -38,7 +43,7 @@ export class TaskService {
       },
       {
         $sort: {
-          createdAt: -1,
+          order: 1, //Head of the linked list first (previousTaskId null first)
         },
       },
       // Group into an "entities" and a "hierarchy" list that is used in FE to display tasks.
@@ -53,11 +58,14 @@ export class TaskService {
               projectId: {$toString: '$projectId'},
               completed: '$completed',
               createdAt: '$createdAt',
+              order: '$order',
             }
           },
           hierarchy: {
             $push: {
               parentTaskId: {$ifNull: [{$toString: '$parentTaskId'}, 'root']},
+              previousTaskId: {$toString: '$previousTaskId'},
+              nextTaskId: {$toString: '$nextTaskId'},
               taskId: {$toString: '$_id'}
             }
           }
@@ -186,11 +194,51 @@ export class TaskService {
     });
   }
 
+  async orderUpdateSameParent(parentTaskId: string, currentOrder: number, newOrder: number) {
+    if (currentOrder > newOrder) {
+      // Shift orders up for the affected tasks
+      await this.taskModel.updateMany(
+        {parentTaskId, order: {$gt: newOrder, $lt: currentOrder}},
+        {$inc: {order: 1}}
+      );
+    } else if (currentOrder < newOrder) {
+      // Shift orders down for the affected tasks
+      await this.taskModel.updateMany(
+        {parentTaskId, order: {$gt: currentOrder, $lt: newOrder}},
+        {$inc: {order: -1}}
+      );
+    }
+  }
+
+  async orderUpdateNewParent(parentTaskId: string, newOrder: number) {
+    await this.taskModel.updateMany(
+      {parentTaskId, order: {$gte: newOrder}},
+      {$inc: {order: 1}}
+    );
+  }
+
+  async orderUpdateOldParent(parentTaskId: string, currentOrder: number) {
+    await this.taskModel.updateMany(
+      {parentTaskId, order: {$gt: currentOrder}},
+      {$inc: {order: -1}}
+    );
+  }
+
   async updateTask(updateDto: UpdateTaskDto): Promise<Task> {
     if (!Types.ObjectId.isValid(updateDto._id)) {
       throw new BadRequestException('Invalid id');
     }
 
+    const task: Task = await this.taskModel.findById(updateDto._id).exec();
+
+    if (task.parentTaskId?.toString() !== updateDto.parentTaskId) {
+      await Promise.all([
+        await this.orderUpdateOldParent(task.parentTaskId?.toString(), task.order),
+        await this.orderUpdateNewParent(updateDto.parentTaskId?.toString(), updateDto.order),
+      ]);
+    } else if (task.order !== updateDto.order) {
+      await this.orderUpdateSameParent(updateDto.parentTaskId, task.order, updateDto.order);
+    }
     const updatedTask = await this.taskModel.findOneAndUpdate({_id: updateDto._id}, updateDto, {new: true}).exec();
     if (!updatedTask) {
       throw new BadRequestException('Task does not exist');
@@ -198,7 +246,7 @@ export class TaskService {
     return updatedTask;
   }
 
-  async shouldUpdateParentTask(updateDto: UpdateTaskStatusDto, tasksToUpdate: string[]): Promise<void> {
+  async shouldUpdateParentTaskStatus(updateDto: UpdateTaskStatusDto, tasksToUpdate: string[]): Promise<void> {
     const parentTaskRes = await this.taskModel.aggregate([
       {
         $match: {_id: new Types.ObjectId(updateDto.parentTaskId)}
@@ -226,7 +274,7 @@ export class TaskService {
       tasksToUpdate.push(updateDto.parentTaskId);
       // Check if parentTask's parent needs to be updated
       if (parentTask.parentTaskId) {
-        await this.shouldUpdateParentTask(
+        await this.shouldUpdateParentTaskStatus(
           {
             _id: parentTask._id.toString(),
             parentTaskId: parentTask.parentTaskId,
@@ -272,7 +320,7 @@ export class TaskService {
     ];
 
     if (updateDto.parentTaskId) {
-      await this.shouldUpdateParentTask(updateDto, taskAndSubtasksIds);
+      await this.shouldUpdateParentTaskStatus(updateDto, taskAndSubtasksIds);
     }
 
     await this.taskModel.updateMany({_id: {$in: taskAndSubtasksIds}}, {completed: updateDto.completed});
@@ -303,6 +351,10 @@ export class TaskService {
         }
       },
     ]);
+
+    if (!tasks[0]) {
+      throw new NotFoundException('Task not found');
+    }
     const subtaskIds = tasks[0].subtasks.map((s) => s._id);
     const taskIds = [
       tasks[0]._id,

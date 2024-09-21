@@ -14,6 +14,9 @@ export class Task extends Document {
   })
   parentTaskId: Types.ObjectId | null;
 
+  @Prop({required: true})
+  order: number;
+
   @Prop({type: MongooseSchema.Types.ObjectId, ref: 'Project', required: true})
   projectId: Types.ObjectId;
 
