@@ -163,10 +163,10 @@ export class TaskService {
           text: {
             query: search ?? '',
             path: 'title',
-            //TODO: Check if we need this
-            // fuzzy: {
-            //   maxEdits: 2, // Allows up to 2 edits (insertions, deletions, or substitutions)
-            // },
+            fuzzy: {
+              maxEdits: 2,
+              maxExpansions: 10
+            }
           },
         },
       });
