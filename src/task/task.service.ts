@@ -6,6 +6,7 @@ import { Task } from './schema/task.schema';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { Project } from './schema/project.schema';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
+import { UpdateTaskTitleDto } from './dto/update-task-title.dto';
 
 @Injectable()
 export class TaskService {
@@ -240,6 +241,18 @@ export class TaskService {
       await this.orderUpdateSameParent(updateDto.parentTaskId, task.order, updateDto.order);
     }
     const updatedTask = await this.taskModel.findOneAndUpdate({_id: updateDto._id}, updateDto, {new: true}).exec();
+    if (!updatedTask) {
+      throw new BadRequestException('Task does not exist');
+    }
+    return updatedTask;
+  }
+
+  async updateTitle(updateTitleDto: UpdateTaskTitleDto): Promise<Task> {
+    if (!Types.ObjectId.isValid(updateTitleDto._id)) {
+      throw new BadRequestException('Invalid id');
+    }
+
+    const updatedTask = await this.taskModel.findOneAndUpdate({_id: updateTitleDto._id}, updateTitleDto, {new: true}).exec();
     if (!updatedTask) {
       throw new BadRequestException('Task does not exist');
     }

@@ -4,6 +4,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { ParseBooleanPipe } from '../common/pipes/parse-boolean.pipe';
+import { UpdateTaskTitleDto } from './dto/update-task-title.dto';
 
 @Controller('task')
 export class TaskController {
@@ -27,6 +28,11 @@ export class TaskController {
   @Patch()
   async update(@Body() updateTaskDto: UpdateTaskDto) {
     return await this.taskService.updateTask(updateTaskDto);
+  }
+
+  @Patch('/title')
+  async updateTitle(@Body() updateTaskDto: UpdateTaskTitleDto) {
+    return await this.taskService.updateTitle(updateTaskDto);
   }
 
   @Patch('/status')
