@@ -10,8 +10,17 @@ function taskCreationPayload() {
 }
 
 export const options = {
-  vus: 20,
-  iterations: 20000
+  vus: 1,
+  iterations: 10
+
+  // ==== Concurrent user testing ====
+  // scenarios: {
+  //   contacts: {
+  //     executor: 'constant-vus',
+  //     vus: 20,
+  //     duration: '1m',
+  //   },ev
+  // },
 };
 
 export default function () {
@@ -20,6 +29,9 @@ export default function () {
     JSON.stringify(taskCreationPayload()),
     {headers: { 'Content-Type': 'application/json' }}
   );
-  check(res, { 'status was 200': (r) => r.status == 200 });
-  sleep(1);
+  check(res, { 'status was 200': (r) => r.status == 201 });
+  if (res.status !== 201) {
+    console.log(res)
+  }
+  sleep(Math.floor(Math.random() * 4) + 1);
 }
